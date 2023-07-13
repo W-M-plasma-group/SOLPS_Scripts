@@ -5,6 +5,8 @@ Created on Wed Apr 22 10:34:21 2020
 @author: Richard
 
 V1.0 - Completed May 18, 2020
+
+V2.0 - Updated June 17, 2023
 """
 
 from TOOLS import SET_WDIR
@@ -13,17 +15,17 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 from matplotlib.path import Path
 import matplotlib.gridspec as gridspec
-from matplotlib.widgets import TextBox, Button, Slider
+from matplotlib.widgets import TextBox, Button, Slider, RadioButtons
 from scipy.interpolate import griddata
-#from SOLPS_Plotter import SOLPSPLOT
 from PARAMDICT import EireneDict
+#from SOLPS_Plotter import SOLPSPLOT
 
 Shot='1100305023'
 Device='cmod'
-Attempt='24Rf2.0' # 15 for 1100308004, 18N for 1080416025, 24 for 1100305023 
+Attempt='24Rf2.0_split2' # 14Rf0.7 for 1100308004, 18Rf0.6 for 1080416025, 24Rf2.0 for 1100305023 
 
-MeshID='024'  # 026 used for Shot025, 020 used for Shot012, 001 for d3d, 
-              # 025 for 1100308004, 024 for 1100305023, 027 for 1080416025
+MeshID='009'  # 026 used for Shot025, 020 used for Shot012, 001 for d3d, 
+              # 025/010 for 1100308004, 024/009 for 1100305023, 027/011 for 1080416025
 LOG=True
 Pressure=True
 Param='PDENA'
@@ -38,9 +40,8 @@ P0=np.empty((2))
 P0.fill(np.nan)  #[1.65,-0.65])
 P1=np.empty((2))
 P1.fill(np.nan)  #[2,-1.1])
-#Thresh=0.05
 
-button1=plt.imread('Icons/rounded-rectangle-button.png')
+#button1=plt.imread('Icons/rounded-rectangle-button.png')
 
 BASEDRT, TOPDRT = SET_WDIR('solps-iter/runs/','')
 if 'd3d' in Shot:
@@ -54,7 +55,13 @@ tz=np.loadtxt('{}/TriangVertLoc{}'.format(DRT,Attempt),usecols = (2))
 
 tr=np.loadtxt('{}/TriangRadLoc{}'.format(DRT,Attempt),usecols = (2))
 
-VVFILE = np.loadtxt('{}/vvfile.ogr'.format(BASEDRT))
+try:
+    WallFile=np.loadtxt('{}/mesh.extra'.format(BASEDRT))
+    WF=True
+except:
+    print('mesh.extra file not found! Using vvfile.ogr instead') 
+    WF=False
+    VVFILE = np.loadtxt('{}/vvfile.ogr'.format(BASEDRT))
 
 Parameter=EireneDict[Param]
 Data=np.loadtxt('{}/{}{}'.format(DRT,Parameter['FileName'],Attempt),usecols = (2))
@@ -76,7 +83,7 @@ if 'EDEN' in Param and Pressure:
 if LOG:
     Data=np.ma.log10(Data)
     Data=Data.filled(np.floor(Data.min()))
-    LogTxt='Log_10 of '
+    LogTxt=r'$Log_{10}$ of '
 else:
     LogTxt=''
 
@@ -120,37 +127,45 @@ Prof2, =Profile.plot(np.nan,np.nan,'r-')
 #resetax = plt.axes([0.125, 0.025, 0.05, 0.05])
 #Reset = Button(resetax, 'Reset', hovercolor='0.975') 
 
-textP0Xax = plt.axes([0.2, 0.3, 0.03, 0.05])
+textP0Xax = plt.axes([0.11, 0.3, 0.05, 0.05])
 P0X_Text = TextBox(textP0Xax, r'$R_{P0}$ (m)', hovercolor='0.9')
 
-textP0Yax = plt.axes([0.275, 0.3, 0.03, 0.05])
+textP0Yax = plt.axes([0.22, 0.3, 0.05, 0.05])
 P0Y_Text = TextBox(textP0Yax, r'$Z_{P0}$ (m)', hovercolor='0.9')
 
-buttonP0ax = plt.axes([0.32, 0.3, 0.05, 0.05])
-P0Button = Button(buttonP0ax, 'Set P0',image=button1)
+buttonP0ax = plt.axes([0.28, 0.3, 0.05, 0.05])
+P0Button = Button(buttonP0ax, 'Set P0')#,image=button1)
 
-clearP0ax = plt.axes([0.38, 0.3, 0.07, 0.05])
-P0Clear = Button(clearP0ax, 'Clear P0',image=button1)
+clearP0ax = plt.axes([0.34, 0.3, 0.07, 0.05])
+P0Clear = Button(clearP0ax, 'Clear P0')#,image=button1)
 
-textP1Xax = plt.axes([0.2, 0.2, 0.03, 0.05])
+textP1Xax = plt.axes([0.11, 0.2, 0.05, 0.05])
 P1X_Text = TextBox(textP1Xax, r'$R_{P1}$ (m)', hovercolor='0.9')
 
-textP1Yax = plt.axes([0.275, 0.2, 0.03, 0.05])
+textP1Yax = plt.axes([0.22, 0.2, 0.05, 0.05])
 P1Y_Text = TextBox(textP1Yax, r'$Z_{P1}$ (m)', hovercolor='0.9')
 
-buttonP1ax = plt.axes([0.32, 0.2, 0.05, 0.05])
-P1Button = Button(buttonP1ax, 'Set P1',image=button1)
+buttonP1ax = plt.axes([0.28, 0.2, 0.05, 0.05])
+P1Button = Button(buttonP1ax, 'Set P1')#,image=button1)
 
-clearP1ax = plt.axes([0.38, 0.2, 0.07, 0.05])
-P1Clear = Button(clearP1ax, 'Clear P1',image=button1)
+clearP1ax = plt.axes([0.34, 0.2, 0.07, 0.05])
+P1Clear = Button(clearP1ax, 'Clear P1')#,image=button1)
 
-plotax = plt.axes([0.45, 0.25, 0.1, 0.05])
-PlotChord = Button(plotax, 'Plot Chord',image=button1)
+radioax = plt.axes([0.42, 0.2, 0.07, 0.15])
+Radio = RadioButtons(radioax, ('nearest', 'linear', 'cubic'),active=1)
+
+plotax = plt.axes([0.5, 0.2, 0.05, 0.15])
+PlotChord = Button(plotax, 'Plot\nChord')#,image=button1)
 
 axslide = plt.axes([0.15, 0.1, 0.4, 0.03])
-sslide = Slider(axslide, 'Threshhold', 0.005, 0.1, valinit=0.015, valfmt='%0.3f', valstep=0.005)
+sslide = Slider(axslide, 'Threshhold', 0.001, 0.025, valinit=0.010, valfmt='%0.3f', valstep=0.001)
 
-Contour.plot(VVFILE[:,0]/1000,VVFILE[:,1]/1000,'k-')
+if WF:
+    for i in range(len(WallFile[:,0])):
+        Contour.plot((WallFile[i,0],WallFile[i,2]),(WallFile[i,1],WallFile[i,3]),'k-',linewidth=3.0)
+else:
+    Contour.plot(VVFILE[:,0]/1000,VVFILE[:,1]/1000,'k-',linewidth=3.0)
+
 IM=Contour.tripcolor(TP,Data)
 Contour.set_aspect('equal')
 Contour.grid()
@@ -164,6 +179,8 @@ def ClearP0(event):
     P0X_Text.set_val('')
     P0Y_Text.set_val('')
     P0_point.set_data(P0)
+    
+P0Clear.on_clicked(ClearP0)
 
 def ClearP1(event): 
     P1.fill(np.nan)
@@ -171,7 +188,6 @@ def ClearP1(event):
     P1Y_Text.set_val('')
     P1_point.set_data(P1)
     
-P0Clear.on_clicked(ClearP0)
 P1Clear.on_clicked(ClearP1)
 
 def submitP0X(text):
@@ -233,9 +249,8 @@ def setP0(event):
 
     P0X_Text.set_val(P0[0])
     P0Y_Text.set_val(P0[1])
-    P0_point.set_data(P0[0],P0[1])
+    P0_point.set_data([P0[0]],[P0[1]])
     EirFig.canvas.draw()
-    #print(P0[0],P0[1])
 
 P0Button.on_clicked(setP0)
 
@@ -250,14 +265,12 @@ def setP1(event):
 
     P1X_Text.set_val(P1[0])
     P1Y_Text.set_val(P1[1])
-    P1_point.set_data(P1[0],P1[1])
+    P1_point.set_data([P1[0]],[P1[1]])
     EirFig.canvas.draw()
-    #print(P1[0],P1[1])
 
 P1Button.on_clicked(setP1)
 
-def chordplot(event):
-    global Prof1
+def chordplot(event):    
     Thresh=round(sslide.val,3)
     print('Threshhold={}m'.format(Thresh))
     PP=P1-P0
@@ -280,11 +293,7 @@ def chordplot(event):
     ChordXY.set_data(ChordX,ChordY)
     
     Chord=np.sqrt((ChordX-P0[0])**2 + (ChordY-P0[1])**2)
-    Chord=Chord-Chord.min()
     Band=np.ma.array(Data,mask=~Mask).compressed()
-
-    #print('Distance along Chord:{}'.format(Chord))
-    #print('{}:{}'.format(Parameter['Label'],Band))
     
     if LOG:
         Avg_Band = 10**np.mean(Band)
@@ -298,12 +307,15 @@ def chordplot(event):
     else:
         Prof1.set_data(Chord,Band)
 
-    Xline=np.linspace(P0[0],P1[0])
-    Yline=np.linspace(P0[1],P1[1])
-
-    Vals=griddata((tr,tz),Data,(Xline,Yline),method='linear')
+    Xline=np.linspace(P0[0],P1[0],num=100)
+    Yline=np.linspace(P0[1],P1[1],num=100)
+    
+    IS=Radio.value_selected
+    
+    print('Interpolation setting currently set to {}'.format(IS))
+    
+    Vals=griddata((tr,tz),Data,(Xline,Yline),method=IS)
     Dist=np.sqrt((Xline-P0[0])**2 + (Yline-P0[1])**2)
-    Dist=Dist-Dist.min()
     
     if LOG and Pressure:
         Prof2.set_data(Dist,10**Vals)
@@ -313,22 +325,25 @@ def chordplot(event):
     Profile.relim()
     Profile.autoscale_view(True,True,True)
     Profile.set_title(r'Average {}: {:.3}'.format(Parameter['Label'],Avg_Band))
+    Profile.legend(['Cell Data','Interpolated\nProfile ({})'.format(IS)])
     
     EirFig.canvas.draw()
+    
+    Output={'Chord':Chord,'Data':Band,'InterpChord':Dist,'InterpData':Vals}
+    
+    return Output   # To access Output dict in workspace, just call A=chordplot(0)
     
 PlotChord.on_clicked(chordplot)
 
 def arrowclick(event):
-    if event.key == 'right' and round(sslide.val,3)<0.1:
-        sslide.set_val(sslide.val+0.005)
-    elif event.key == 'left' and round(sslide.val,3)>0.005:
-        sslide.set_val(sslide.val-0.005)
+    if event.key == 'right' and round(sslide.val,3)<0.025:
+        sslide.set_val(sslide.val+0.001)
+    elif event.key == 'left' and round(sslide.val,3)>0.001:
+        sslide.set_val(sslide.val-0.001)
     else:
         pass        
 
 cid2 = EirFig.canvas.mpl_connect('key_press_event', arrowclick)
 
 plt.show()
-
-    
-    
+ 

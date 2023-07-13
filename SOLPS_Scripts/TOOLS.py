@@ -37,6 +37,23 @@ def TANH(r,r0,h,d,b,m):
 def EXPFIT(x,A,l):  #Removed vertical displacement variable B; seemed to cause 'overfitting'
     return A*np.exp(l*x)
 
+def R2PsiN(GF,R,Z=0):
+    '''Uses equilibrium to convert from R to PsiN
+        Must provide gfile (GF) loaded as an equilibrium object
+        Default assumes Z=0'''
+    PP=GF.psiN(R,Z)[0]
+    
+    return PP
+
+def PsiN2R(GF,psin,Z=0):
+    '''uses equilibrium to convert from PsiN to R
+       Must provide gfile (GF) loaded as an equilibrium object
+       Default assumes Z=0'''
+    Rlfs=[i for i in GF.R if i>GF.axis.r]
+    RR=np.interp(psin,R2PsiN(GF,Rlfs,Z),Rlfs)
+    
+    return RR
+
 def WALL_INTERSECT(C0,C1,r):
     '''
     Calculate the intersection between a line or set of lines specified by points
@@ -92,6 +109,36 @@ def gaussian_shading(ax, x, y, y_unc, c='k', min_val=0.0):
                         alpha=stats.norm.pdf(5*ij/num)/norm_val,
                         linewidth=0.0,
                         color=c)
+
+def ErrorQuant(exp_data, model_data, exp_unc=None, name=None):
+    '''Calculate a collection of Goodness-of-Fit Error Quantification metrics 
+    for a set of experiemntal data and corresponding model prediction data'''
+    
+    if len(exp_data) == len(model_data):
+        N = len(exp_data)
+        err = exp_data - model_data
+        exp_mean = np.mean(exp_data)
+        exp_var = exp_data - exp_mean
+        
+        MAE = np.sum(np.abs(err))/N
+        RMSE = np.sqrt(np.sum(err**2)/N)
+        
+        RAE = np.sum(np.abs(err))/np.sum(np.abs(exp_var))
+        RSE = np.sqrt(np.sum(err**2)/np.sum(exp_var**2))
+        
+        if exp_unc is not None and len(exp_unc) == len(exp_data):
+            norm_res = err/exp_unc
+            
+            return {'MAE':MAE, 'RMSE':RMSE, 'RAE':RAE, 'RSE':RSE, 'norm_res':norm_res, 'Quantity':name}
+            
+        else:
+            
+            return {'MAE':MAE, 'RMSE':RMSE, 'RAE':RAE, 'RSE':RSE, 'Quantity':name}
+        
+    else:
+        print("Experimental data array and model data array must be the same length")
+        quit()            
+
 
 def JumpConnect(host, user, ssh_home, jumphost,port=22):
     client = paramiko.SSHClient()

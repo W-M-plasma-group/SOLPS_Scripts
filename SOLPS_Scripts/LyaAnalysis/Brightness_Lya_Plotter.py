@@ -13,27 +13,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 import equilibrium as eq
 from scipy.interpolate import interp1d
-from TOOLS import SET_WDIR, gaussian_shading
+from TOOLS import SET_WDIR, R2PsiN, PsiN2R, gaussian_shading
 from SOLPS_Plotter import SOLPSPLOT
-from B2TransportParser import R2PsiN, PsiN2R
 
 plt.rc('font',size=30)
 plt.rc('lines',linewidth=5,markersize=15)
 
-Plot= True
+Plot=False
 Error_Analysis=True
-RADC='psin' #'radial' #
+
+RADC='radial' #'psin' #
 EMISS='tomo' #'tree'#
 
 SHOTS = ['1100308004','1080416025','1100305023'] #,
-ATTEMPTS = [['14Rf0.35','14Rf0.7','14Rf1.05'],['18Rf0.3','18Rf0.6','18Rf0.9'],['24Rf1.0','24Rf2.0','24Rf3.0']] # ,
+ATTEMPTS = [['14Rf0.35_split2','14Rf0.7_split2','14Rf1.05_split2'],
+            ['18Rf0.3_split2','18Rf0.6_split2','18Rf0.9_split2'],
+            ['24Rf1.0_split2','24Rf2.0_split2','24Rf3.0_split2']]
+
 AN=len(SHOTS)
 
 LCFS_Te=[83,90,93]
 JXA=[40,40,55]
-JXI=[59,58,37]
+JXI=[59,58,38]
 PsinOffset=[0,0.02,-0.014]
 RadOffset=[0,0.005,-0.007]
+LyaBrightErr = 0.05
 
 if EMISS=='tree':
     Remiss_idx=2
@@ -42,79 +46,91 @@ elif EMISS=='tomo':
     Remiss_idx=4
     emiss_idx=5
     
-# Load Experimental Data
+## Load Experimental Data ##
 
 BASE,TOP = SET_WDIR('','')
 
-GFCMOD='{}gfileProcessing/cmod_files/'.format(TOP)
+GFCMOD='{}gfileProcessing/cmod_files/'.format(TOP)                                              #gfile directory under TOP directory
 
 GFiles=[]
+bright=[]
+nn=[]
 
 for A in SHOTS:
-    GFiles.append(eq.equilibrium(gfile='{}g{}.01000'.format(GFCMOD,A)))
+    GFiles.append(eq.equilibrium(gfile='{}g{}.01000'.format(GFCMOD,A)))                         #Load gfiles into list
+    
+    with open('{}Brightness_Profiles/lya_brightness_{}_v2.pkl'.format(GFCMOD,A),'rb') as file1:
+        bright.append(pkl.load(file1))                                                          #Experimental Ly-a brightness and emissivity data
 
-bright = [pkl.load(open('lya_brightness_{}.pkl'.format(A),'rb')) for A in SHOTS]
-
-nn = [pkl.load(open('{}Brightness_Profiles/lyman_data_{}.pkl'.format(GFCMOD,A),'rb')) 
-      for A in SHOTS]
+    with open('{}Brightness_Profiles/lyman_data_{}.pkl'.format(GFCMOD,A),'rb') as file2:
+        nn.append(pkl.load(file2))                                                              #Experimental neutral density profile data
 
 nnlogerr=[]
 
 for N in nn:
-    N[1]=1e6*N[1]
+    N[1]=1e6*N[1]                       #Convert neutral density data from units of cm^-3 to m^-3
     N[2]=1e6*N[2]
-    nnlogerr.append(0.434*N[2]/N[1])
+    nnlogerr.append(0.434*N[2]/N[1])    #Process neutral density error for semilogy plotting
 
-solps=[SOLPSPLOT(SHOTS[i], ATTEMPTS[i], Markers=False, JXA=JXA[i], JXI=JXI[i], 
+lyabrighterr = [LyaBrightErr*bright[A][1] for A in SHOTS]                       #Assume 3% nominal uncertainty in Ly-a Brightness measurements
+
+## Load SOLPS simulation data ##
+
+solps=[SOLPSPLOT(SHOTS[i], ATTEMPTS[i], Markers=False, JXA=JXA[i], JXI=JXI[i], TimeRange=[0.95,1.05],
                  PlotScheme=['b--','b-','b--'], PsinOffset=PsinOffset[i], RadOffset=RadOffset[i]) 
-                 for i in range(AN)]
+                 for i in range(AN)]    #Load nominal SOLPS B2-matrix data
 
-LYMID_coords=pkl.load(open('{}lya_coords_v3.pkl'.format(GFCMOD),'rb'))
-RLYMID0=np.sqrt(LYMID_coords['tang']['X']**2 + LYMID_coords['tang']['Y']**2)
-RLYMID0=np.flip(RLYMID0)
+with open('{}/Chords/lya_coords_new.pkl'.format(GFCMOD),'rb') as file3:
+    LYMID_coords=pkl.load(file3)   #Load in LYMID XYZ coordinates from pickle file
+    
+RLYMID0=np.flip(np.sqrt(LYMID_coords['tangent']['X']**2 + LYMID_coords['tangent']['Y']**2))    #Calculate R coordinates of tangent points (R^2=X^2+Y^2)
+ZLYMID0=np.flip(LYMID_coords['start']['Z'])                                                    #Pull Z coordinates of tangent points from start coordinates     
 
 LYMID = np.zeros((AN,len(RLYMID0),3))
 
 for m,a in enumerate(SHOTS):
     for n,i in enumerate(ATTEMPTS[m]):
         LYMID[m,:,n]=np.loadtxt('{}SOLPS_2d_prof/cmod/{}home/Attempt{}/Output/LyaBrightW{}'.format(TOP,a,i,i),
-                        skiprows=2)[:,1]    
+                        skiprows=2)[:,1]    # Load special Brightness profile simulation data
+
+
+Rbright=[]
+Remiss=[]    
+Rnn=[]
+Sep=[]
+RLYMID=[]
+
+if RADC=='radial':                                          # Convert all data coordinates to R (meters)
+    for m in range(AN):
+        
+        Rbright.append(bright[m][0])                        # Brightness profile coordinates already given in R
+        Remiss.append(bright[m][Remiss_idx])                # Emissivity profile coordinates already given in R
+        Rnn.append(PsiN2R(GFiles[m],nn[m][0],Z=ZLYMID0[0]))    # Convert neutral density coordinates from PsiN to R with gfile
+        Sep.append(PsiN2R(GFiles[m],1.0,Z=ZLYMID0[0]))    # Calculate R coordinate of Separatrix from gfile
+        RLYMID.append(RLYMID0)                              # SOLPS brightness profile coordinates already given in R
+
+        '''
+        Rnn[m]=np.array([[j for j,k in zip(*GFiles[m].get_fluxsurface(i)) if j > GFiles[m].axis.r and k==0] 
+                         for i in nn[m][0]])[:,0]  
+        Sep[m]=GFiles[m].get_fluxsurface(1.0)[0].max()
+        '''
+        
+    Rlabel=r'Major Radius [m]'
+    
+elif RADC=='psin':                                                          # Convert all data coordinates to PsiN
+    for m in range(AN):
+        
+        Rbright.append(R2PsiN(GFiles[m],bright[m][0],Z=ZLYMID0))
+        Remiss.append(R2PsiN(GFiles[m],bright[m][Remiss_idx],Z=ZLYMID0))
+        Rnn.append(nn[m][0])
+        Sep.append(1)
+        RLYMID.append(R2PsiN(GFiles[m],RLYMID0,Z=ZLYMID0))
+    
+    Rlabel=r'$\Psi_n$'
+
+### PLOTTING ROUTINE ###
 
 if Plot:
-    
-    Rbright=[]
-    Remiss=[]    
-    Rnn=[]
-    Sep=[]
-    RLYMID=[]
-
-    if RADC=='radial':
-        for m in range(AN):
-            
-            Rbright.append(bright[m][0])
-            Remiss.append(bright[m][Remiss_idx])
-            Rnn.append(PsiN2R(GFiles[m],nn[m][0]))
-            Sep.append(PsiN2R(GFiles[m],nn[m][0]))
-            RLYMID.append(RLYMID0)
-
-            '''
-            Rnn[m]=np.array([[j for j,k in zip(*GFiles[m].get_fluxsurface(i)) if j > GFiles[m].axis.r and k==0] 
-                             for i in nn[m][0]])[:,0]  
-            Sep[m]=GFiles[m].get_fluxsurface(1.0)[0].max()
-            '''
-            
-        Rlabel=r'Major Radius [m]'
-        
-    elif RADC=='psin':
-        for m in range(AN):
-            
-            Rbright.append(R2PsiN(GFiles[m],bright[m][0]))
-            Remiss.append(R2PsiN(GFiles[m],bright[m][Remiss_idx]))
-            Rnn.append(nn[m][0])
-            Sep.append(1)
-            RLYMID.append(R2PsiN(GFiles[m],RLYMID0))
-        
-        Rlabel=r'$\Psi_n$'
     
     figA,axA=plt.subplots(3,AN,sharex=True,sharey='row')
     figB,axB=plt.subplots(3,AN,sharex=True,sharey='row')
@@ -124,15 +140,17 @@ if Plot:
     
     for p in range(AN):
         
-        solps[p].RadProf('DN',RADC=RADC,AX=axA[0,p],PlotScheme=['g--','g-','g--'],Publish=['$\pm 50\%\;D_n$','$D_n$',None])
-        solps[p].RadProf('KYE',RADC=RADC,AX=axA[0,p],PlotScheme=['m--','m-','m--'],Publish=['$\pm 50\%\;\chi_e$','$\chi_e$',None])
+        solps[p].RadProf('DN',RADC='psin',AX=axA[0,p],PlotScheme=['g--','g-','g--'],Publish=['$\pm 50\%\;D_n$','$D_n$',None])
+        solps[p].RadProf('KYE',RADC='psin',AX=axA[0,p],PlotScheme=['m--','m-','m--'],Publish=['$\pm 50\%\;\chi_e$','$\chi_e$',None])
         axA[0,p].legend()
         
-        solps[p].RadProf('Te',RADC=RADC,AX=axA[1,p],PlotScheme=['r--','b-','b--'],Publish=['$\pm50\%$','Base',None])
-        axA[1,p].axhline(LCFS_Te[0],linestyle=':',color='orange',label='2PM Te')
+        solps[p].RadProf('Te',RADC='psin',AX=axA[1,p],PlotScheme=['r--','b-','b--'],Publish=[None,'Base','$\pm50\%$'])
+        axA[1,p].get_lines()[0].set_color('blue')
+        #axA[1,p].axhline(LCFS_Te[0],linestyle=':',color='orange',label='2PM Te')
         axA[1,p].legend()
         
-        solps[p].RadProf('Ne',RADC=RADC,AX=axA[2,p],PlotScheme=['r--','b-','b--'],Publish=['$\pm50\%$','Base',None])
+        solps[p].RadProf('Ne',RADC=RADC,AX=axA[2,p],PlotScheme=['r--','b-','b--'],Publish=[None,'Base','$\pm50\%$'])
+        axA[2,p].get_lines()[0].set_color('blue')
         axA[2,p].legend()
         
         axA[0,p].axvline(Sep[p],linestyle=':')
@@ -154,14 +172,16 @@ if Plot:
         axB[0,p].legend(['$\pm50\%$','Base','_nolabel','LYMID'],loc=2)
         
         solps[p].RadProf('LyaEmissW',RADC=RADC,AX=axB[1,p], Publish=['$\pm50\%$','Base',None])
-        axB[1,p].plot(Remiss[p],bright[p][emiss_idx],'--*',color='red',label='LYMID')
+        axB[1,p].plot(Remiss[p],bright[p][emiss_idx],'r--',label='LYMID')
         axB[1,p].legend()
         
         axB[2,p].plot(RLYMID[p],LYMID[p][:,0],'b--',linewidth='2.0',label='+/-50%')
-        axB[2,p].plot(RLYMID[p],LYMID[p][:,1],'b-',linewidth='2.0',label='Base')
+        axB[2,p].plot(RLYMID[p],LYMID[p][:,1],'bx-',linewidth='2.0',label='Base')
         axB[2,p].plot(RLYMID[p],LYMID[p][:,2],'b--',linewidth='2.0',label=None)
-        axB[2,p].plot(Rbright[p],bright[p][1],'--*',color='red',label='LYMID')
+        axB[2,p].errorbar(Rbright[p],bright[p][1],lyabrighterr[p],fmt='r--',label='LYMID')
         axB[2,p].legend()
+        
+        plt.errorbar()
         
         axB[0,p].axvline(Sep[p],linestyle=':')
         axB[1,p].axvline(Sep[p],linestyle=':')
@@ -230,6 +250,8 @@ if Plot:
         SOLPS_nn=[]
         SOLPS_emiss=[]
         SOLPS_R=[]
+        Interp_ne=[]
+        Interp_te=[]
         Interp_Exp_nn=[]
         Interp_Exp_emiss=[]
         Interp_Exp_bright=[]
@@ -286,9 +308,14 @@ if Plot:
             SOLPS_nn.append(solps[p].PARAM['NeuDen'].loc[:,JXA[p],:].values)
             SOLPS_emiss.append(solps[p].PARAM['LyaEmissW'].loc[:,JXA[p],:].values)
             
-            Interp_nn=interp1d(Rnn[p],nn[p][1])
-            Interp_emiss=interp1d(Remiss[p],bright[p][emiss_idx]) 
-            Interp_bright=interp1d(Rbright[p],bright[p][1])
+            Interp_ne=interp1d(SOLPS_R[p],SOLPS_ne[p])
+            Interp_te=interp1d(SOLPS_R[p],SOLPS_te[p])
+            Interp_nn=interp1d(SOLPS_R[p],SOLPS_nn[p])
+            Interp_emiss=interp1d(SOLPS_R[p],SOLPS_emiss[p]) 
+            Interp_bright=interp1d(RLYMID0,LYMID[p,:])
+            
+            i = np.min([x for x in range(len(SOLPS_R[p])) if SOLPS_R[p][x] > Rnn[p][0]])
+            Interp_Exp_nn.append(Interp_nn(SOLPS_R[p][i:]))
             
             i = np.min([x for x in range(len(SOLPS_R[p])) if SOLPS_R[p][x] > Rnn[p][0]])
             Interp_Exp_nn.append(Interp_nn(SOLPS_R[p][i:]))

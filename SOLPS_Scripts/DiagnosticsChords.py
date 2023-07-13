@@ -9,56 +9,83 @@ SOLPS Diagnostics Chord Plotter
 
 import numpy as np
 import pickle as pkl
+import json
 import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as ptchs
+from matplotlib import colormaps
 from TOOLS import WALL_INTERSECT, OpenRemoteFile, SSH_config, JumpConnect
 
 def SOLPSDiagnostiChorder(filepath, 
-                          device='CMOD', plot=True,
+                          device='CMOD', plot=True, ax=None,
                           RemoteSave=False, RemotePath=None,
-                          Output=None, EndKey='tang', 
-                          Extend2wall=False, Reverse=False):
+                          Output=None, EndKey='tang', Coord='cartesian',
+                          ViewAngle=False, Extend2wall=False, Reverse=False):
     
     filename,fmt=os.path.splitext(filepath)
     
-    ReadType={'.pkl':'rb','.chords':'r'}
+    ReadType={'.pkl':'rb','.chords':'r','.json':'r'}
     
     if device == 'CMOD':
-        r1=0.46
-        r2=0.93
-        sep=0.91
+        r1=0.44020 #Inner wall at Z=-0.0382
+        lim=0.90778 #Wall limiter at Z=-0.0382
+        r2=1.06160 #Outer wall at Z=-0.0382 (Max R)
+        sep=(0.88496+0.88398+0.89410)/3 #Average separatrix position at Z=-0.0382
     
     if RemotePath:
         RR=SSH_config()
         file=OpenRemoteFile('{}{}'.format(RemotePath,filepath),
                             ReadType[fmt],**RR)
+    
     else:
         file=open(filepath,ReadType[fmt])
     
     if fmt == '.pkl':
-        HH=pkl.load(file)           
+        HH=pkl.load(file)
+        file.close()           
         C0=HH['start']
-        C1=HH[EndKey] #Keyword might be 'end' or 'tang'
+        C1=HH[EndKey] #Keyword might be 'end' (for wall end), 'tang' (for tangent), or 'ph' (for pinhole)
         n=len(C0['Z'])
-        
-        if 'R' and 'phi' in C0.keys(): #Convert R,phi to X,Y coords
-            C0['X']=np.array([C0['R'][i]*np.cos(np.radians(C0['phi'][i])) for i in range(n)])
-            C0['Y']=np.array([C0['R'][i]*np.sin(np.radians(C0['phi'][i])) for i in range(n)])
-            C1['X']=np.array([C1['R'][i]*np.cos(np.radians(C1['phi'][i])) for i in range(n)])
-            C1['Y']=np.array([C1['R'][i]*np.sin(np.radians(C1['phi'][i])) for i in range(n)])
             
     elif fmt == '.chords': #.chords format ONLY has X,Y,Z coords
         HH=np.loadtxt(file,skiprows=1)
+        file.close()
         HH=HH.T
         n=len(HH[0])
         C0={'X':np.array(HH[0]),'Y':np.array(HH[1]),'Z':np.array(HH[2])}
         C1={'X':np.array(HH[3]),'Y':np.array(HH[4]),'Z':np.array(HH[5])}
     
+    elif fmt == '.json':
+        HH=json.load(file)
+        file.close()
+        C0={'X':np.array(HH['start']['X']),'Y':np.array(HH['start']['Y']),'Z':np.array(HH['start']['Z'])}
+        C1={'X':np.array(HH[EndKey]['X']),'Y':np.array(HH[EndKey]['Y']),'Z':np.array(HH[EndKey]['Z'])}
+        n=len(C0['Z'])
+    
+    
+    if Coord =='cartesian' and 'R' and 'phi' in C0.keys(): #Convert R,phi to X,Y coords
+        C0['X']=np.array([C0['R'][i]*np.cos(np.radians(C0['phi'][i])) for i in range(n)])
+        C0['Y']=np.array([C0['R'][i]*np.sin(np.radians(C0['phi'][i])) for i in range(n)])
+        C1['X']=np.array([C1['R'][i]*np.cos(np.radians(C1['phi'][i])) for i in range(n)])
+        C1['Y']=np.array([C1['R'][i]*np.sin(np.radians(C1['phi'][i])) for i in range(n)])
+        
+    elif Coord == 'cylindrical' and 'X' and 'Y' in C0.keys():
+        C0['R']=np.array([np.sqrt(C0['X'][i]**2+C0['Y'][i]**2) for i in range(n)])
+        C0['phi']=np.degrees(np.arctan2(C0['Y'],C0['X']))
+        C1['R']=np.array([np.sqrt(C1['X'][i]**2+C1['Y'][i]**2) for i in range(n)])
+        C1['phi']=np.degrees(np.arctan2(C1['Y'],C1['X']))
+    
     if Extend2wall:
         P1,P2=WALL_INTERSECT(C0,C1,r2)
+        
+        Ctang={}
+        Ctang['X']=(P1['X']+P2['X'])/2
+        Ctang['Y']=(P1['Y']+P2['Y'])/2
+        
         C1['X']=P1['X']
         C1['Y']=P1['Y']
+        
+        HH['Ctang']=Ctang
         
     if Output:
         outpath,savename=os.path.split(Output)
@@ -85,34 +112,67 @@ def SOLPSDiagnostiChorder(filepath,
                        header="'{}' 100".format(oname))
         elif ofmt == '.pkl':
             MAT={'start':C0,'end':C1}
-            pkl.dump(MAT,open(Output,'xb'))
+            try:
+                MAT['tangent']=Ctang
+            except:
+                print('No tangent points found!')    
+            with open(Output,'xb') as f:
+                pkl.dump(MAT,f)
         if RemoteSave:
             RR=SSH_config()
             JJ=JumpConnect(**RR)
             JJ.open_sftp().put(Output,'{}{}'.format(RemotePath,savename))            
     
     if plot==True:
-        fig1,ax1=plt.subplots()
+        if ax:
+            ax1=ax
+        else:
+            fig1,ax1=plt.subplots()
         ax1.set_xlim(-(r2+0.1),r2+0.1)
         ax1.set_ylim(-(r2+0.1),r2+0.1)
-        ax1.add_patch(ptchs.Circle((0,0),r1,fill=False,edgecolor='k',linewidth=3))
-        ax1.add_patch(ptchs.Circle((0,0),r2,fill=False,edgecolor='k',linewidth=3))
-        ax1.add_patch(ptchs.Circle((0,0),sep,fill=False,edgecolor='k',linewidth=3,linestyle=':'))  
+        ax1.add_patch(ptchs.Circle((0,0),r1,fill=False,edgecolor='k',linewidth=2))
+        ax1.add_patch(ptchs.Circle((0,0),lim,fill=False,edgecolor='k',linewidth=2,linestyle='--', label='RF Limiter'))
+        ax1.add_patch(ptchs.Circle((0,0),r2,fill=False,edgecolor='k',linewidth=2, label='Outer Wall'))
+        ax1.add_patch(ptchs.Circle((0,0),sep,fill=False,edgecolor='r',linewidth=2,linestyle=':', label='Separatrix'))  
+        
+        ax1.set_prop_cycle(color=colormaps['tab20b'].colors)
         
         for i in range(n):
-            ax1.plot([C0['X'][i],C1['X'][i]],[C0['Y'][i],C1['Y'][i]])
+            ax1.plot([C0['X'][i],C1['X'][i]],[C0['Y'][i],C1['Y'][i]], linewidth=1)
             
-        ax1.set_aspect('equal')
+        try:
+            ax1.plot(Ctang['X'],Ctang['Y'], 'gx', markersize=7, label='Tangency Point')
+        except:
+            print('No Tangent Radii Found!')
         
-    return C0,C1
+        ax1.set_aspect('equal')
+        ax1.set_xlabel('X (m)')
+        ax1.set_ylabel('Y (m)')
+        
+    if ViewAngle:
+        vv=np.array([(C1['X']-C0['X']),(C1['Y']-C0['Y']),(C1['Z']-C0['Z'])])
+        v1=vv[:,0]
+        v2=vv[:,-1]
+        
+        v1=v1/np.linalg.norm(v1)
+        v2=v2/np.linalg.norm(v2)
+        
+        view_angle=np.arccos(np.clip(np.dot(v1,v2),-1.0,1.0))
+        view_angle=round(np.degrees(view_angle),3)
+        
+        HH['view angle']=view_angle
+        
+        print('Angle of View is {} degrees'.format(round(view_angle,1)))
+        
+    return HH,C0,C1
 
 if __name__=='__main__':
     
-    
-    A=SOLPSDiagnostiChorder('LYA_MID_WALL_Zero.chords', 
-                              device='CMOD', plot=True, RemoteSave=False, 
-                              RemotePath=None, EndKey='end',
-                              Output=None)
+    figc,axc=plt.subplots()
+    A=SOLPSDiagnostiChorder('C:/Users/Richard/WMGDrive/College of William and Mary/Research/SOLPS Stuff/gfileProcessing/cmod_files/Chords/LYMID_PINHOLE.json', 
+                              plot=False, ax=axc, Output=False, 
+                              device='CMOD', EndKey='end', Coord='cylindrical',
+                              Extend2wall=False, Reverse=True, ViewAngle=True)
     
 '''       
 Etendue=np.array([4.8e-9,5.5e-9,5.9e-9,6.3e-9,6.7e-9,6.9e-9,7.3e-9,
